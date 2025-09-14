@@ -1,0 +1,10 @@
+.env
+*.log
+.vscode/
+.idea/
+*.test
+*.out
+vendor/
+*.exe
+*.dll
+.CLAUDE.md
