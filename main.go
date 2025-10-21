@@ -15,6 +15,8 @@ func main() {
 	config.LoadConfig()
 
 	app := fiber.New(fiber.Config{
+		StrictRouting: true,
+		CaseSensitive: true,
 		ErrorHandler: func(ctx *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {
