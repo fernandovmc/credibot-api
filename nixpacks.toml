@@ -2,7 +2,10 @@
 nixPkgs = ["go_1_21"]
 
 [phases.build]
-cmds = ["go build -o credibot-api ."]
+cmds = [
+  "go mod download",
+  "go build -tags netgo -ldflags '-w -extldflags \"-static\"' -o credibot-api ."
+]
 
 [start]
 cmd = "./credibot-api"
