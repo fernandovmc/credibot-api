@@ -1,0 +1,278 @@
+basePath: /api/v1
+definitions:
+  models.ChatRequest:
+    properties:
+      max_tokens:
+        type: integer
+      message:
+        minLength: 1
+        type: string
+      model:
+        type: string
+    required:
+    - message
+    type: object
+  models.ClienteSummary:
+    properties:
+      ativo:
+        type: boolean
+      classe_risco:
+        type: string
+      cpf_cnpj:
+        type: string
+      id:
+        type: string
+      nome:
+        type: string
+      score_credito:
+        type: integer
+      tipo_pessoa:
+        type: string
+    type: object
+  models.ErrorResponse:
+    properties:
+      code:
+        type: integer
+      error:
+        type: boolean
+      message:
+        type: string
+    type: object
+  models.PaginatedResponse:
+    properties:
+      data: {}
+      message:
+        type: string
+      pagination:
+        $ref: '#/definitions/models.Pagination'
+      success:
+        type: boolean
+    type: object
+  models.Pagination:
+    properties:
+      page:
+        type: integer
+      per_page:
+        type: integer
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  models.SmartChatResponse:
+    properties:
+      created_at:
+        type: string
+      database_data: {}
+      message:
+        type: string
+      sql_query:
+        type: string
+      used_database:
+        type: boolean
+    type: object
+  models.SuccessResponse:
+    properties:
+      data: {}
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
+host: localhost:3000
+info:
+  contact:
+    email: fernandovmc.contato@gmail.com
+    name: Credibot API Support
+  description: API para análise de crédito com integração OpenAI e Supabase
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: Credibot API
+  version: "1.0"
+paths:
+  /chat:
+    post:
+      consumes:
+      - application/json
+      description: Send a message to OpenAI for a simple chat response
+      parameters:
+      - description: Chat request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.ChatRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Chat with OpenAI
+      tags:
+      - Chat
+  /cliente/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Fetch a single cliente with all data by UUID
+      parameters:
+      - description: Cliente UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Get cliente by ID
+      tags:
+      - Clientes
+  /clientes:
+    get:
+      consumes:
+      - application/json
+      description: Get a paginated list of clientes with essential fields only
+      parameters:
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 25
+        description: Items per page
+        in: query
+        name: per_page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/models.PaginatedResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/models.ClienteSummary'
+                  type: array
+              type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: List clientes with pagination
+      tags:
+      - Clientes
+  /data/{table}:
+    get:
+      consumes:
+      - application/json
+      description: Generic endpoint to fetch data from any database table
+      parameters:
+      - description: Table name
+        in: path
+        name: table
+        required: true
+        type: string
+      - default: 10
+        description: Limit
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      - default: created_at
+        description: Order by field
+        in: query
+        name: order_by
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Get data from any table
+      tags:
+      - Database
+  /smart-chat:
+    post:
+      consumes:
+      - application/json
+      description: Send a question that can automatically query the database and provide
+        intelligent responses
+      parameters:
+      - description: Smart chat request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.ChatRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/models.SuccessResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.SmartChatResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Smart Chat with Database Integration
+      tags:
+      - Chat
+schemes:
+- http
+- https
+swagger: "2.0"

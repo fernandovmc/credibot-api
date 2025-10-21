@@ -76,6 +76,19 @@ func makeSupabaseRequest(method, table string, body interface{}, queryParams map
 }
 
 // GetData fetches data from a specific table
+// @Summary Get data from any table
+// @Description Generic endpoint to fetch data from any database table
+// @Tags Database
+// @Accept json
+// @Produce json
+// @Param table path string true "Table name"
+// @Param limit query int false "Limit" default(10)
+// @Param offset query int false "Offset" default(0)
+// @Param order_by query string false "Order by field" default(created_at)
+// @Success 200 {object} models.SuccessResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /data/{table} [get]
 func GetData(c *fiber.Ctx) error {
 	table := c.Params("table")
 	if table == "" {
@@ -90,14 +103,21 @@ func GetData(c *fiber.Ctx) error {
 	limit := c.Query("limit", "10")
 	offset := c.Query("offset", "0")
 	orderBy := c.Query("order_by", "created_at")
-	
+
 	limitInt, _ := strconv.Atoi(limit)
 	if limitInt > 50 { // Safety limit to prevent token overflow
 		limitInt = 50
 	}
-	
+
+	// Define select fields based on table
+	selectFields := "*"
+	if table == "clientes" {
+		// For clientes table, return only essential fields
+		selectFields = "id,nome,cpf_cnpj,score_credito,classe_risco,tipo_pessoa,ativo"
+	}
+
 	queryParams := map[string]string{
-		"select": "*",
+		"select": selectFields,
 		"limit":  strconv.Itoa(limitInt), // Use the safety-limited value
 		"offset": offset,
 		"order":  orderBy + ".desc",
@@ -271,6 +291,16 @@ func DeleteData(c *fiber.Ctx) error {
 }
 
 // GetClientes fetches clientes with pagination and limited fields
+// @Summary List clientes with pagination
+// @Description Get a paginated list of clientes with essential fields only
+// @Tags Clientes
+// @Accept json
+// @Produce json
+// @Param page query int false "Page number" default(1)
+// @Param per_page query int false "Items per page" default(25)
+// @Success 200 {object} models.PaginatedResponse{data=[]models.ClienteSummary}
+// @Failure 500 {object} models.ErrorResponse
+// @Router /clientes [get]
 func GetClientes(c *fiber.Ctx) error {
 	// Parse pagination parameters
 	page, _ := strconv.Atoi(c.Query("page", "1"))
@@ -362,6 +392,17 @@ func GetClientes(c *fiber.Ctx) error {
 }
 
 // GetClienteByID fetches a single cliente with all fields by ID
+// @Summary Get cliente by ID
+// @Description Fetch a single cliente with all data by UUID
+// @Tags Clientes
+// @Accept json
+// @Produce json
+// @Param id path string true "Cliente UUID"
+// @Success 200 {object} models.SuccessResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 404 {object} models.ErrorResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /cliente/{id} [get]
 func GetClienteByID(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {

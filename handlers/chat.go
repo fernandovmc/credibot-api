@@ -12,6 +12,16 @@ import (
 )
 
 // Chat handles chat requests with OpenAI
+// @Summary Chat with OpenAI
+// @Description Send a message to OpenAI for a simple chat response
+// @Tags Chat
+// @Accept json
+// @Produce json
+// @Param request body models.ChatRequest true "Chat request"
+// @Success 200 {object} models.SuccessResponse
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /chat [post]
 func Chat(c *fiber.Ctx) error {
 	var req models.ChatRequest
 	

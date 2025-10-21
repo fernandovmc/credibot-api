@@ -16,6 +16,16 @@ import (
 )
 
 // SmartChat handles intelligent chat requests with database integration
+// @Summary Smart Chat with Database Integration
+// @Description Send a question that can automatically query the database and provide intelligent responses
+// @Tags Chat
+// @Accept json
+// @Produce json
+// @Param request body models.ChatRequest true "Smart chat request"
+// @Success 200 {object} models.SuccessResponse{data=models.SmartChatResponse}
+// @Failure 400 {object} models.ErrorResponse
+// @Failure 500 {object} models.ErrorResponse
+// @Router /smart-chat [post]
 func SmartChat(c *fiber.Ctx) error {
 	var req models.ChatRequest
 	

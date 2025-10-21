@@ -2,6 +2,7 @@ package main
 
 import (
 	"credibot-api/config"
+	_ "credibot-api/docs"
 	"credibot-api/handlers"
 	"log"
 	"os"
@@ -9,7 +10,23 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
+	fiberSwagger "github.com/swaggo/fiber-swagger"
 )
+
+// @title Credibot API
+// @version 1.0
+// @description API para análise de crédito com integração OpenAI e Supabase
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name Credibot API Support
+// @contact.email fernandovmc.contato@gmail.com
+
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+
+// @host localhost:3000
+// @BasePath /api/v1
+// @schemes http https
 
 func main() {
 	config.LoadConfig()
@@ -45,6 +62,9 @@ func main() {
 		log.Printf("[DEBUG] Method: %s, Path: %s, Headers: %v", c.Method(), c.Path(), c.GetReqHeaders())
 		return c.Next()
 	})
+
+	// SWAGGER documentation
+	app.Get("/swagger/*", fiberSwagger.WrapHandler)
 
 	// HEALTH
 	app.Get("/", func(c *fiber.Ctx) error {
