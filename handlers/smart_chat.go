@@ -365,40 +365,42 @@ func parseWhereConditions(whereClause string, queryParams map[string]string) {
 		}
 
 		// Parse different operators
-		// Greater than: field > value
-		if matches := regexp.MustCompile(`(\w+)\s*>\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
-			field := matches[1]
-			value := cleanValue(matches[2])
-			queryParams[field] = "gt." + value
-			continue
-		}
+		// Note: \w+ matches letters, digits, and underscore (includes field names like score_credito, cpf_cnpj)
 
-		// Greater than or equal: field >= value
-		if matches := regexp.MustCompile(`(\w+)\s*>=\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
+		// Greater than or equal: field >= value (must be before >)
+		if matches := regexp.MustCompile(`([\w_]+)\s*>=\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
 			field := matches[1]
 			value := cleanValue(matches[2])
 			queryParams[field] = "gte." + value
 			continue
 		}
 
-		// Less than: field < value
-		if matches := regexp.MustCompile(`(\w+)\s*<\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
+		// Greater than: field > value
+		if matches := regexp.MustCompile(`([\w_]+)\s*>\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
 			field := matches[1]
 			value := cleanValue(matches[2])
-			queryParams[field] = "lt." + value
+			queryParams[field] = "gt." + value
 			continue
 		}
 
-		// Less than or equal: field <= value
-		if matches := regexp.MustCompile(`(\w+)\s*<=\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
+		// Less than or equal: field <= value (must be before <)
+		if matches := regexp.MustCompile(`([\w_]+)\s*<=\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
 			field := matches[1]
 			value := cleanValue(matches[2])
 			queryParams[field] = "lte." + value
 			continue
 		}
 
-		// Equal: field = value (must be checked after >= and <=)
-		if matches := regexp.MustCompile(`(\w+)\s*=\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
+		// Less than: field < value
+		if matches := regexp.MustCompile(`([\w_]+)\s*<\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
+			field := matches[1]
+			value := cleanValue(matches[2])
+			queryParams[field] = "lt." + value
+			continue
+		}
+
+		// Equal: field = value
+		if matches := regexp.MustCompile(`([\w_]+)\s*=\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
 			field := matches[1]
 			value := cleanValue(matches[2])
 			queryParams[field] = "eq." + value
@@ -406,7 +408,7 @@ func parseWhereConditions(whereClause string, queryParams map[string]string) {
 		}
 
 		// LIKE: field LIKE 'value'
-		if matches := regexp.MustCompile(`(\w+)\s+like\s+['"](.+)['"]`).FindStringSubmatch(condition); len(matches) >= 3 {
+		if matches := regexp.MustCompile(`([\w_]+)\s+like\s+['"](.+)['"]`).FindStringSubmatch(condition); len(matches) >= 3 {
 			field := matches[1]
 			value := matches[2]
 			// Convert SQL LIKE to PostgREST like
