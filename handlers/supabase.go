@@ -269,3 +269,142 @@ func DeleteData(c *fiber.Ctx) error {
 		Message: "Data deleted successfully",
 	})
 }
+
+// GetClientes fetches clientes with pagination and limited fields
+func GetClientes(c *fiber.Ctx) error {
+	// Parse pagination parameters
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	perPage, _ := strconv.Atoi(c.Query("per_page", "25"))
+
+	// Validate and limit pagination
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 25
+	}
+	if perPage > 100 {
+		perPage = 100 // Maximum limit for safety
+	}
+
+	// Calculate offset
+	offset := (page - 1) * perPage
+
+	// Get total count first
+	countParams := map[string]string{
+		"select": "count",
+	}
+	countBody, err := makeSupabaseRequest("GET", "clientes", nil, countParams)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "Failed to get total count: " + err.Error(),
+			Code:    fiber.StatusInternalServerError,
+		})
+	}
+
+	var countResult []map[string]interface{}
+	if err := json.Unmarshal(countBody, &countResult); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "Failed to parse count: " + err.Error(),
+			Code:    fiber.StatusInternalServerError,
+		})
+	}
+
+	total := 0
+	if len(countResult) > 0 {
+		if count, ok := countResult[0]["count"].(float64); ok {
+			total = int(count)
+		}
+	}
+
+	// Fetch limited fields for clientes
+	queryParams := map[string]string{
+		"select": "id,nome,cpf_cnpj,score_credito,classe_risco,tipo_pessoa,ativo",
+		"limit":  strconv.Itoa(perPage),
+		"offset": strconv.Itoa(offset),
+		"order":  "nome.asc",
+	}
+
+	responseBody, err := makeSupabaseRequest("GET", "clientes", nil, queryParams)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "Failed to fetch clientes: " + err.Error(),
+			Code:    fiber.StatusInternalServerError,
+		})
+	}
+
+	var clientes []models.ClienteSummary
+	if err := json.Unmarshal(responseBody, &clientes); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "Failed to parse clientes: " + err.Error(),
+			Code:    fiber.StatusInternalServerError,
+		})
+	}
+
+	// Calculate total pages
+	totalPages := (total + perPage - 1) / perPage
+
+	return c.JSON(models.PaginatedResponse{
+		Success: true,
+		Data:    clientes,
+		Pagination: models.Pagination{
+			Page:       page,
+			PerPage:    perPage,
+			Total:      total,
+			TotalPages: totalPages,
+		},
+		Message: "Clientes retrieved successfully",
+	})
+}
+
+// GetClienteByID fetches a single cliente with all fields by ID
+func GetClienteByID(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "Cliente ID is required",
+			Code:    fiber.StatusBadRequest,
+		})
+	}
+
+	queryParams := map[string]string{
+		"id": "eq." + id,
+	}
+
+	responseBody, err := makeSupabaseRequest("GET", "clientes", nil, queryParams)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "Failed to fetch cliente: " + err.Error(),
+			Code:    fiber.StatusInternalServerError,
+		})
+	}
+
+	var clientes []map[string]interface{}
+	if err := json.Unmarshal(responseBody, &clientes); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "Failed to parse cliente: " + err.Error(),
+			Code:    fiber.StatusInternalServerError,
+		})
+	}
+
+	if len(clientes) == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "Cliente not found",
+			Code:    fiber.StatusNotFound,
+		})
+	}
+
+	return c.JSON(models.SuccessResponse{
+		Success: true,
+		Data:    clientes[0],
+		Message: "Cliente retrieved successfully",
+	})
+}

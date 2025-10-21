@@ -55,6 +55,33 @@ type SuccessResponse struct {
 	Message string      `json:"message,omitempty"`
 }
 
+// PaginatedResponse represents a paginated response
+type PaginatedResponse struct {
+	Success    bool        `json:"success"`
+	Data       interface{} `json:"data"`
+	Pagination Pagination  `json:"pagination"`
+	Message    string      `json:"message,omitempty"`
+}
+
+// Pagination represents pagination metadata
+type Pagination struct {
+	Page       int `json:"page"`
+	PerPage    int `json:"per_page"`
+	Total      int `json:"total"`
+	TotalPages int `json:"total_pages"`
+}
+
+// ClienteSummary represents a summarized cliente for list view
+type ClienteSummary struct {
+	ID           string `json:"id"`
+	Nome         string `json:"nome"`
+	CPFCNPJ      string `json:"cpf_cnpj"`
+	ScoreCredito int    `json:"score_credito"`
+	ClasseRisco  string `json:"classe_risco"`
+	TipoPessoa   string `json:"tipo_pessoa"`
+	Ativo        bool   `json:"ativo"`
+}
+
 // SupabaseConfig contains Supabase configurations
 type SupabaseConfig struct {
 	URL    string

@@ -68,7 +68,11 @@ func main() {
 	api.Post("/chat", handlers.Chat)
 	api.Post("/smart-chat", handlers.SmartChat)
 
-	// SUPABASE (READ-ONLY)
+	// CLIENTES (with pagination and specific endpoints)
+	api.Get("/clientes", handlers.GetClientes)
+	api.Get("/cliente/:id", handlers.GetClienteByID)
+
+	// SUPABASE (READ-ONLY) - Generic endpoint for other tables
 	api.Get("/data/:table", handlers.GetData)
 
 	// START
