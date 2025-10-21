@@ -21,7 +21,7 @@ func main() {
 				code = e.Code
 			}
 			return ctx.Status(code).JSON(fiber.Map{
-				"error": true,
+				"error":   true,
 				"message": err.Error(),
 			})
 		},
@@ -54,7 +54,7 @@ func main() {
 	if port == "" {
 		port = "3000"
 	}
-	
+
 	log.Printf("Server starting on port %s", port)
 	log.Fatal(app.Listen(":" + port))
 }

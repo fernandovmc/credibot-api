@@ -105,22 +105,30 @@ func analyzeQuestionAndGenerateSQL(question string) (bool, string, error) {
 
 	systemPrompt := `Assistente de análise de crédito com SQL.
 
-TABELAS:
-- clientes: nome, score_credito, classe_risco, tipo_pessoa, renda_mensal
-- analises_credito: decisao, valor_solicitado, valor_aprovado, cliente_id
-- operacoes_credito: valor_contratado, status, modalidade, dias_atraso, cliente_id
-- historico_pagamentos: status, valor_pago, dias_atraso, operacao_id
-- modalidades_credito: nome, categoria, taxa_minima, taxa_maxima
-- score_historico: score_atual, score_anterior, cliente_id
+TABELAS DISPONÍVEIS:
+- clientes: id, nome, cpf_cnpj, score_credito, classe_risco, tipo_pessoa (PF/PJ), renda_mensal, faturamento_anual, uf, cidade, ativo
+- analises_credito: id, cliente_id, decisao, valor_solicitado, valor_aprovado, taxa_aprovada, data_analise, modalidade_solicitada
+- operacoes_credito: id, cliente_id, valor_contratado, valor_saldo, status, modalidade, dias_atraso, taxa_juros_mensal, data_contratacao
+- historico_pagamentos: id, operacao_id, status, valor_pago, valor_parcela, dias_atraso, data_vencimento, data_pagamento
+- modalidades_credito: id, nome, categoria, taxa_minima, taxa_maxima, prazo_minimo, prazo_maximo, valor_minimo, valor_maximo
 
-REGRAS:
-1. Apenas SELECT permitido
-2. Sempre usar LIMIT (max 50)
-3. Se precisa de dados: responda EXATAMENTE "SQL: [query sem formatação]"
-4. Se não precisa: responda "NO_DATABASE_NEEDED"
-5. NÃO use markdown, code blocks ou formatação
+OBSERVAÇÕES:
+- Tabela score_historico NÃO está populada - NÃO use em queries
+- Use apenas SELECT (INSERT/UPDATE/DELETE proibidos)
 
-EXEMPLO: SQL: SELECT nome FROM clientes LIMIT 10
+REGRAS IMPORTANTES:
+1. SEMPRE inclua os campos relevantes no SELECT (não apenas o nome)
+2. Para perguntas sobre clientes com scores: SELECT nome, score_credito, classe_risco FROM clientes
+3. Para rankings: use ORDER BY com o campo apropriado
+4. SEMPRE use LIMIT (máximo 50 registros)
+5. Para filtros: use WHERE com condições apropriadas
+6. Retorne EXATAMENTE no formato: SQL: [query sem formatação, markdown ou code blocks]
+7. Se não precisa de dados do banco: retorne "NO_DATABASE_NEEDED"
+
+EXEMPLOS CORRETOS:
+- "Clientes com maior score": SQL: SELECT nome, score_credito, classe_risco FROM clientes WHERE ativo = true ORDER BY score_credito DESC LIMIT 10
+- "Operações em atraso": SQL: SELECT o.modalidade, o.dias_atraso, o.valor_saldo FROM operacoes_credito o WHERE o.status = 'Vencido' ORDER BY o.dias_atraso DESC LIMIT 20
+- "Score acima de 700": SQL: SELECT nome, score_credito, classe_risco, tipo_pessoa FROM clientes WHERE score_credito > 700 AND ativo = true ORDER BY score_credito DESC LIMIT 30
 
 PERGUNTA: ` + question
 
@@ -241,16 +249,20 @@ func isValidSelectQuery(query string) bool {
 func executeSupabaseQuery(sqlQuery string) ([]map[string]interface{}, error) {
 	baseURL := os.Getenv("SUPABASE_URL")
 	apiKey := os.Getenv("SUPABASE_API_KEY")
-	
+
 	if baseURL == "" || apiKey == "" {
 		return nil, fmt.Errorf("supabase credentials not configured")
 	}
 
-	// For now, we'll use the REST API with PostgREST syntax
-	// Convert basic SQL to PostgREST format
-	restQuery := convertSQLToPostgREST(sqlQuery)
-	
-	responseBody, err := makeSupabaseRequest("GET", restQuery, nil, nil)
+	// Convert SQL to PostgREST format
+	tableName, queryParams := convertSQLToPostgREST(sqlQuery)
+
+	// Debug logging - remove in production
+	fmt.Printf("[DEBUG] SQL Query: %s\n", sqlQuery)
+	fmt.Printf("[DEBUG] Table: %s\n", tableName)
+	fmt.Printf("[DEBUG] Query Params: %+v\n", queryParams)
+
+	responseBody, err := makeSupabaseRequest("GET", tableName, nil, queryParams)
 	if err != nil {
 		return nil, err
 	}
@@ -261,22 +273,157 @@ func executeSupabaseQuery(sqlQuery string) ([]map[string]interface{}, error) {
 		return nil, err
 	}
 
+	fmt.Printf("[DEBUG] Results count: %d\n", len(result))
+
 	return result, nil
 }
 
-// convertSQLToPostgREST converts basic SQL to PostgREST format (simplified)
-func convertSQLToPostgREST(sqlQuery string) string {
-	// This is a simplified conversion - in production, you'd want a more robust SQL parser
+// convertSQLToPostgREST converts SQL to PostgREST format
+func convertSQLToPostgREST(sqlQuery string) (string, map[string]string) {
 	query := strings.ToLower(strings.TrimSpace(sqlQuery))
-	
+	queryParams := make(map[string]string)
+
 	// Extract table name from "FROM table_name"
-	re := regexp.MustCompile(`from\s+(\w+)`)
-	matches := re.FindStringSubmatch(query)
-	if len(matches) < 2 {
-		return "clientes" // default table
+	tableRe := regexp.MustCompile(`from\s+(\w+)`)
+	tableMatches := tableRe.FindStringSubmatch(query)
+	tableName := "clientes" // default
+	if len(tableMatches) >= 2 {
+		tableName = tableMatches[1]
 	}
-	
-	return matches[1]
+
+	// Extract SELECT fields
+	selectRe := regexp.MustCompile(`select\s+(.*?)\s+from`)
+	selectMatches := selectRe.FindStringSubmatch(query)
+	if len(selectMatches) >= 2 {
+		fields := strings.TrimSpace(selectMatches[1])
+		if fields != "*" {
+			// Convert "campo1, campo2" to "campo1,campo2" (remove spaces)
+			fields = regexp.MustCompile(`\s*,\s*`).ReplaceAllString(fields, ",")
+			queryParams["select"] = fields
+		}
+	}
+
+	// Extract WHERE conditions
+	whereRe := regexp.MustCompile(`where\s+(.*?)(?:\s+order\s+by|\s+limit|\s*$)`)
+	whereMatches := whereRe.FindStringSubmatch(query)
+	if len(whereMatches) >= 2 {
+		whereClause := strings.TrimSpace(whereMatches[1])
+		// Convert basic WHERE to PostgREST format
+		// Examples: "score_credito > 800" -> "score_credito=gt.800"
+		whereClause = convertWhereClause(whereClause)
+		if whereClause != "" {
+			// For PostgREST, WHERE conditions are added as individual parameters
+			// This is a simplified version - will parse common patterns
+			parseWhereConditions(whereClause, queryParams)
+		}
+	}
+
+	// Extract ORDER BY
+	orderRe := regexp.MustCompile(`order\s+by\s+([\w_]+)(?:\s+(asc|desc))?`)
+	orderMatches := orderRe.FindStringSubmatch(query)
+	if len(orderMatches) >= 2 {
+		orderField := orderMatches[1]
+		orderDir := "asc"
+		if len(orderMatches) >= 3 && orderMatches[2] != "" {
+			orderDir = orderMatches[2]
+		}
+		if orderDir == "desc" {
+			queryParams["order"] = orderField + ".desc"
+		} else {
+			queryParams["order"] = orderField + ".asc"
+		}
+	}
+
+	// Extract LIMIT
+	limitRe := regexp.MustCompile(`limit\s+(\d+)`)
+	limitMatches := limitRe.FindStringSubmatch(query)
+	if len(limitMatches) >= 2 {
+		queryParams["limit"] = limitMatches[1]
+	}
+
+	return tableName, queryParams
+}
+
+// convertWhereClause converts SQL WHERE clause to PostgREST format
+func convertWhereClause(whereClause string) string {
+	// Remove extra spaces
+	whereClause = regexp.MustCompile(`\s+`).ReplaceAllString(whereClause, " ")
+	return strings.TrimSpace(whereClause)
+}
+
+// parseWhereConditions parses WHERE conditions and adds them to query params
+func parseWhereConditions(whereClause string, queryParams map[string]string) {
+	// Split by AND (case insensitive)
+	// Use regex to split by 'and' or 'AND'
+	conditionRegex := regexp.MustCompile(`\s+and\s+`)
+	conditions := conditionRegex.Split(whereClause, -1)
+
+	for _, condition := range conditions {
+		condition = strings.TrimSpace(condition)
+		if condition == "" {
+			continue
+		}
+
+		// Parse different operators
+		// Greater than: field > value
+		if matches := regexp.MustCompile(`(\w+)\s*>\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
+			field := matches[1]
+			value := cleanValue(matches[2])
+			queryParams[field] = "gt." + value
+			continue
+		}
+
+		// Greater than or equal: field >= value
+		if matches := regexp.MustCompile(`(\w+)\s*>=\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
+			field := matches[1]
+			value := cleanValue(matches[2])
+			queryParams[field] = "gte." + value
+			continue
+		}
+
+		// Less than: field < value
+		if matches := regexp.MustCompile(`(\w+)\s*<\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
+			field := matches[1]
+			value := cleanValue(matches[2])
+			queryParams[field] = "lt." + value
+			continue
+		}
+
+		// Less than or equal: field <= value
+		if matches := regexp.MustCompile(`(\w+)\s*<=\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
+			field := matches[1]
+			value := cleanValue(matches[2])
+			queryParams[field] = "lte." + value
+			continue
+		}
+
+		// Equal: field = value (must be checked after >= and <=)
+		if matches := regexp.MustCompile(`(\w+)\s*=\s*(.+)`).FindStringSubmatch(condition); len(matches) >= 3 {
+			field := matches[1]
+			value := cleanValue(matches[2])
+			queryParams[field] = "eq." + value
+			continue
+		}
+
+		// LIKE: field LIKE 'value'
+		if matches := regexp.MustCompile(`(\w+)\s+like\s+['"](.+)['"]`).FindStringSubmatch(condition); len(matches) >= 3 {
+			field := matches[1]
+			value := matches[2]
+			// Convert SQL LIKE to PostgREST like
+			queryParams[field] = "like." + value
+			continue
+		}
+	}
+}
+
+// cleanValue removes quotes and trims whitespace from SQL values
+func cleanValue(value string) string {
+	value = strings.TrimSpace(value)
+	// Remove single quotes
+	value = strings.Trim(value, "'")
+	// Remove double quotes
+	value = strings.Trim(value, "\"")
+	return value
 }
 
 // generateResponseWithData creates a natural language response based on query results
