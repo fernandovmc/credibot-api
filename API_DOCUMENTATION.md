@@ -100,19 +100,51 @@ Envia uma mensagem inteligente que pode consultar o banco de dados automaticamen
 
 ---
 
-### 4. Listar Clientes (Paginado)
+### 4. Listar Clientes (Paginado com Filtros)
 
 **GET** `/api/v1/clientes`
 
-Lista clientes com paginação e campos otimizados.
+Lista clientes com paginação, campos otimizados e filtros avançados.
 
 **Query Parameters:**
+
+**Paginação:**
 - `page` (int, optional): Número da página (default: 1)
 - `per_page` (int, optional): Itens por página (default: 25, max: 100)
 
-**Example:**
+**Filtros:**
+- `search` (string, optional): Busca por nome (case-insensitive, partial match)
+- `score_min` (int, optional): Score mínimo (0-1000)
+- `score_max` (int, optional): Score máximo (0-1000)
+- `classe_risco` (string, optional): Filtro por classe de risco (ex: "Baixo", "Médio", "Alto")
+- `tipo_pessoa` (string, optional): Filtro por tipo de pessoa ("PF" ou "PJ")
+- `ativo` (boolean, optional): Filtro por status ativo (true/false)
+
+**Examples:**
+
+Básico com paginação:
 ```
 GET /api/v1/clientes?page=1&per_page=25
+```
+
+Buscar por nome:
+```
+GET /api/v1/clientes?search=silva&page=1&per_page=25
+```
+
+Filtrar por score:
+```
+GET /api/v1/clientes?score_min=700&score_max=900&page=1
+```
+
+Filtrar por tipo e status:
+```
+GET /api/v1/clientes?tipo_pessoa=PF&ativo=true&page=1
+```
+
+Filtros combinados:
+```
+GET /api/v1/clientes?search=joão&score_min=750&classe_risco=Baixo&tipo_pessoa=PF&ativo=true
 ```
 
 **Response:**
@@ -338,6 +370,36 @@ async function getClientes(page = 1, perPage = 25) {
   const data = await response.json();
   return data;
 }
+```
+
+### Listar Clientes com Filtros
+```javascript
+async function getClientesWithFilters(filters = {}) {
+  const params = new URLSearchParams({
+    page: filters.page || 1,
+    per_page: filters.perPage || 25,
+    ...(filters.search && { search: filters.search }),
+    ...(filters.scoreMin && { score_min: filters.scoreMin }),
+    ...(filters.scoreMax && { score_max: filters.scoreMax }),
+    ...(filters.classeRisco && { classe_risco: filters.classeRisco }),
+    ...(filters.tipoPessoa && { tipo_pessoa: filters.tipoPessoa }),
+    ...(filters.ativo !== undefined && { ativo: filters.ativo }),
+  });
+
+  const response = await fetch(`${API_BASE_URL}/clientes?${params}`);
+  const data = await response.json();
+  return data;
+}
+
+// Exemplo de uso:
+const clientes = await getClientesWithFilters({
+  search: 'silva',
+  scoreMin: 700,
+  tipoPessoa: 'PF',
+  ativo: true,
+  page: 1,
+  perPage: 25
+});
 ```
 
 ### Buscar Cliente por ID

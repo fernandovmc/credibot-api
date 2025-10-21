@@ -121,7 +121,7 @@ const docTemplate = `{
         },
         "/clientes": {
             "get": {
-                "description": "Get a paginated list of clientes with essential fields only",
+                "description": "Get a paginated list of clientes with essential fields and optional filters",
                 "consumes": [
                     "application/json"
                 ],
@@ -131,7 +131,7 @@ const docTemplate = `{
                 "tags": [
                     "Clientes"
                 ],
-                "summary": "List clientes with pagination",
+                "summary": "List clientes with pagination and filters",
                 "parameters": [
                     {
                         "type": "integer",
@@ -145,6 +145,42 @@ const docTemplate = `{
                         "default": 25,
                         "description": "Items per page",
                         "name": "per_page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search by name (case-insensitive partial match)",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Minimum credit score (0-1000)",
+                        "name": "score_min",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum credit score (0-1000)",
+                        "name": "score_max",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by risk class",
+                        "name": "classe_risco",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by person type (PF or PJ)",
+                        "name": "tipo_pessoa",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter by active status",
+                        "name": "ativo",
                         "in": "query"
                     }
                 ],
@@ -334,9 +370,7 @@ const docTemplate = `{
                 "cpf_cnpj": {
                     "type": "string"
                 },
-                "id": {
-                    "type": "string"
-                },
+                "id": {},
                 "nome": {
                     "type": "string"
                 },

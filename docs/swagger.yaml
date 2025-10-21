@@ -20,8 +20,7 @@ definitions:
         type: string
       cpf_cnpj:
         type: string
-      id:
-        type: string
+      id: {}
       nome:
         type: string
       score_credito:
@@ -159,7 +158,8 @@ paths:
     get:
       consumes:
       - application/json
-      description: Get a paginated list of clientes with essential fields only
+      description: Get a paginated list of clientes with essential fields and optional
+        filters
       parameters:
       - default: 1
         description: Page number
@@ -171,6 +171,30 @@ paths:
         in: query
         name: per_page
         type: integer
+      - description: Search by name (case-insensitive partial match)
+        in: query
+        name: search
+        type: string
+      - description: Minimum credit score (0-1000)
+        in: query
+        name: score_min
+        type: integer
+      - description: Maximum credit score (0-1000)
+        in: query
+        name: score_max
+        type: integer
+      - description: Filter by risk class
+        in: query
+        name: classe_risco
+        type: string
+      - description: Filter by person type (PF or PJ)
+        in: query
+        name: tipo_pessoa
+        type: string
+      - description: Filter by active status
+        in: query
+        name: ativo
+        type: boolean
       produces:
       - application/json
       responses:
@@ -189,7 +213,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/models.ErrorResponse'
-      summary: List clientes with pagination
+      summary: List clientes with pagination and filters
       tags:
       - Clientes
   /data/{table}:

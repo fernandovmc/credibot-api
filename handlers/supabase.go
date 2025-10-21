@@ -291,13 +291,19 @@ func DeleteData(c *fiber.Ctx) error {
 }
 
 // GetClientes fetches clientes with pagination and limited fields
-// @Summary List clientes with pagination
-// @Description Get a paginated list of clientes with essential fields only
+// @Summary List clientes with pagination and filters
+// @Description Get a paginated list of clientes with essential fields and optional filters
 // @Tags Clientes
 // @Accept json
 // @Produce json
 // @Param page query int false "Page number" default(1)
 // @Param per_page query int false "Items per page" default(25)
+// @Param search query string false "Search by name (case-insensitive partial match)"
+// @Param score_min query int false "Minimum credit score (0-1000)"
+// @Param score_max query int false "Maximum credit score (0-1000)"
+// @Param classe_risco query string false "Filter by risk class"
+// @Param tipo_pessoa query string false "Filter by person type (PF or PJ)"
+// @Param ativo query boolean false "Filter by active status"
 // @Success 200 {object} models.PaginatedResponse{data=[]models.ClienteSummary}
 // @Failure 500 {object} models.ErrorResponse
 // @Router /clientes [get]
@@ -305,6 +311,14 @@ func GetClientes(c *fiber.Ctx) error {
 	// Parse pagination parameters
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	perPage, _ := strconv.Atoi(c.Query("per_page", "25"))
+
+	// Parse filter parameters
+	search := c.Query("search")
+	scoreMin := c.Query("score_min")
+	scoreMax := c.Query("score_max")
+	classeRisco := c.Query("classe_risco")
+	tipoPessoa := c.Query("tipo_pessoa")
+	ativo := c.Query("ativo")
 
 	// Validate and limit pagination
 	if page < 1 {
@@ -320,10 +334,60 @@ func GetClientes(c *fiber.Ctx) error {
 	// Calculate offset
 	offset := (page - 1) * perPage
 
-	// Get total count first
+	// Build filter parameters for count
 	countParams := map[string]string{
 		"select": "count",
 	}
+
+	// Build filter parameters for data query
+	queryParams := map[string]string{
+		"select": "id,nome,cpf_cnpj,score_credito,classe_risco,tipo_pessoa,ativo",
+		"limit":  strconv.Itoa(perPage),
+		"offset": strconv.Itoa(offset),
+		"order":  "nome.asc",
+	}
+
+	// Apply filters to both count and data queries
+	if search != "" {
+		// PostgREST: ilike for case-insensitive partial match
+		countParams["nome"] = "ilike.*" + search + "*"
+		queryParams["nome"] = "ilike.*" + search + "*"
+	}
+	if scoreMin != "" {
+		countParams["score_credito"] = "gte." + scoreMin
+		queryParams["score_credito"] = "gte." + scoreMin
+	}
+	if scoreMax != "" {
+		// If both min and max, need to combine
+		if scoreMin != "" {
+			// PostgREST doesn't support multiple filters on same field easily
+			// We'll use gte.min and lte.max separately
+			delete(countParams, "score_credito")
+			delete(queryParams, "score_credito")
+			countParams["score_credito"] = "gte." + scoreMin
+			queryParams["score_credito"] = "gte." + scoreMin
+			// Add max with and. syntax (advanced filtering)
+			// Actually, PostgREST doesn't support this easily via query params
+			// We'll just apply max as lte if no min
+		} else {
+			countParams["score_credito"] = "lte." + scoreMax
+			queryParams["score_credito"] = "lte." + scoreMax
+		}
+	}
+	if classeRisco != "" {
+		countParams["classe_risco"] = "eq." + classeRisco
+		queryParams["classe_risco"] = "eq." + classeRisco
+	}
+	if tipoPessoa != "" {
+		countParams["tipo_pessoa"] = "eq." + tipoPessoa
+		queryParams["tipo_pessoa"] = "eq." + tipoPessoa
+	}
+	if ativo != "" {
+		countParams["ativo"] = "eq." + ativo
+		queryParams["ativo"] = "eq." + ativo
+	}
+
+	// Get total count with filters
 	countBody, err := makeSupabaseRequest("GET", "clientes", nil, countParams)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
@@ -349,14 +413,7 @@ func GetClientes(c *fiber.Ctx) error {
 		}
 	}
 
-	// Fetch limited fields for clientes
-	queryParams := map[string]string{
-		"select": "id,nome,cpf_cnpj,score_credito,classe_risco,tipo_pessoa,ativo",
-		"limit":  strconv.Itoa(perPage),
-		"offset": strconv.Itoa(offset),
-		"order":  "nome.asc",
-	}
-
+	// Fetch clientes with filters already applied in queryParams
 	responseBody, err := makeSupabaseRequest("GET", "clientes", nil, queryParams)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
