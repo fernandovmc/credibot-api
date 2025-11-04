@@ -128,17 +128,30 @@ OBSERVAÇÕES:
 
 REGRAS IMPORTANTES:
 1. SEMPRE inclua os campos relevantes no SELECT (não apenas o nome)
-2. Para perguntas sobre clientes com scores: SELECT nome, score_credito, classe_risco FROM clientes
-3. Para rankings: use ORDER BY com o campo apropriado
-4. SEMPRE use LIMIT (máximo 50 registros)
+2. Para perguntas sobre clientes com scores: SELECT nome, score_credito, classe_risco, tipo_pessoa FROM clientes
+3. Para rankings: OBRIGATORIAMENTE use ORDER BY com o campo apropriado
+4. LIMITE CRITICAL - USE ISTO PARA CADA TIPO DE PERGUNTA:
+   *** Para "clientes com menor/maior score": SEMPRE usar LIMIT 100 (NÃO USAR LIMIT 10!) ***
+   *** Para "top 10/20": SEMPRE usar LIMIT conforme pedido (ex: LIMIT 20 para "top 20") ***
+   *** Para "análises" ou "distribuição": usar LIMIT 100 ***
+   *** MÁXIMO PERMITIDO: 100 registros ***
+   NÃO VIOLE ISTO - O USUÁRIO QUER DADOS DETALHADOS!
 5. Para filtros: use WHERE com condições apropriadas
 6. Retorne EXATAMENTE no formato: SQL: [query sem formatação, markdown ou code blocks]
 7. Se não precisa de dados do banco: retorne "NO_DATABASE_NEEDED"
 
-EXEMPLOS CORRETOS:
-- "Clientes com maior score": SQL: SELECT nome, score_credito, classe_risco FROM clientes WHERE ativo = true ORDER BY score_credito DESC LIMIT 10
-- "Operações em atraso": SQL: SELECT o.modalidade, o.dias_atraso, o.valor_saldo FROM operacoes_credito o WHERE o.status = 'Vencido' ORDER BY o.dias_atraso DESC LIMIT 20
-- "Score acima de 700": SQL: SELECT nome, score_credito, classe_risco, tipo_pessoa FROM clientes WHERE score_credito > 700 AND ativo = true ORDER BY score_credito DESC LIMIT 30
+EXEMPLOS CORRETOS E OBRIGATÓRIOS:
+❌ ERRADO: SELECT nome, score_credito FROM clientes ORDER BY score_credito ASC LIMIT 10
+✅ CORRETO: SELECT nome, score_credito, classe_risco, tipo_pessoa FROM clientes ORDER BY score_credito ASC LIMIT 100
+
+❌ ERRADO: SELECT nome, score_credito FROM clientes ORDER BY score_credito DESC LIMIT 10
+✅ CORRETO: SELECT nome, score_credito, classe_risco, tipo_pessoa FROM clientes ORDER BY score_credito DESC LIMIT 100
+
+Se perguntam "clientes com menor score" = SEMPRE LIMIT 100
+Se perguntam "clientes com maior score" = SEMPRE LIMIT 100
+Se perguntam "clientes" em geral = SEMPRE LIMIT 100
+Se perguntam "top 10" ou "10 melhores" = LIMIT 10
+Se perguntam "top 20" ou "20 melhores" = LIMIT 20
 
 PERGUNTA: ` + question
 
@@ -151,7 +164,7 @@ PERGUNTA: ` + question
 				{Role: openai.ChatMessageRoleUser, Content: question},
 			},
 			MaxTokens:   150, // Reduced for SQL generation
-			Temperature: 0.1, // Low temperature for consistent SQL generation
+			Temperature: 0.5, // Increased for better instruction following (not too low, not too high)
 		},
 	)
 
@@ -447,28 +460,80 @@ func generateResponseWithData(originalQuestion string, data []map[string]interfa
 
 	client := openai.NewClient(apiKey)
 
-	// Limit data to avoid token overflow - take only first 10 records and summarize
+	// Limit data intelligently to balance detail and token usage
+	// For small datasets (<50): pass all
+	// For medium datasets (50-200): pass first 100 with stats
+	// For large datasets (>200): pass first 200 with comprehensive stats
 	limitedData := data
-	if len(data) > 10 {
-		limitedData = data[:10]
+	maxRecordsToSummary := 100
+	if len(data) > 200 {
+		maxRecordsToSummary = 200
+		limitedData = data[:maxRecordsToSummary]
+	} else if len(data) > 100 {
+		maxRecordsToSummary = 100
+		limitedData = data[:maxRecordsToSummary]
 	}
 
-	// Create a summary instead of full JSON to save tokens
-	dataSummary := createDataSummary(limitedData)
+	// Create a detailed summary with statistics instead of full JSON to save tokens
+	dataSummary := createDetailedDataSummary(limitedData, len(data))
 	
-	systemPrompt := `Você é um assistente especializado em análise de crédito. 
+	systemPrompt := `Você é um assistente especializado em análise de crédito e risco bancário.
 
-Baseado nos dados fornecidos do banco de dados, responda à pergunta do usuário de forma natural e informativa.
+Baseado nos dados fornecidos do banco de dados, responda à pergunta do usuário de forma DETALHADA, PROFISSIONAL e bem FORMATADA.
 
-INSTRUÇÕES:
-- Use os dados fornecidos para responder
-- Seja claro e objetivo  
-- Formate números adequadamente (valores monetários em R$, percentuais com %)
-- Destaque informações importantes
-- Se não houver dados, informe que não foram encontrados registros
-- Limite a resposta a no máximo 300 palavras
+TIPOS DE PERGUNTAS QUE VOCÊ RESPONDE:
+1. "Qual é o histórico de score do cliente CPF xxx" → Retorne histórico de scores com datas
+2. "Faça uma análise de crédito do cliente ID xxx" → Análise completa: scores, operações, pagamentos, risco
+3. "Faça uma análise de crédito do cliente João Gomes" → Busque por nome e faça análise completa
+4. "Faça uma análise de crédito do cliente CPF 321.321" → Busque por CPF e faça análise completa
+5. "Devo aprovar crédito pro cliente x? Justifique" → Recomendação fundada em dados com riscos e benefícios
+6. "Quais clientes têm menor/maior score" → Ranking com estatísticas e distribuição
+7. "Quais operações estão em atraso" → Lista de operações vencidas com análise
+8. "Qual é a distribuição de clientes por classe de risco" → Tabela de distribuição em %
 
-RESUMO DOS DADOS: ` + dataSummary
+INSTRUÇÕES OBRIGATÓRIAS DE FORMATAÇÃO:
+- Use MARKDOWN para estruturar respostas
+- Use **negrito** para destacar números importantes
+- Use ### para subtítulos de seções
+- Use tabelas Markdown para comparações e dados estruturados
+- Use listas numeradas (1., 2., 3.) para recomendações
+- Use ✅/❌ para indicar aprovação/rejeição em análises
+- Use emojis relevantes para melhor legibilidade (📊, 📈, ⚠️, ✓, ✗, 💰, 🏦, 📋)
+
+EXEMPLOS DE FORMATAÇÃO:
+### Análise de Crédito
+**Cliente:** João Silva | **CPF:** 123.456.789-00 | **Score:** 750
+
+**Indicadores Principais:**
+| Métrica | Valor | Status |
+|---------|-------|--------|
+| Score de Crédito | 750 | ✅ Bom |
+| Classe de Risco | A | ✅ Baixo |
+| Operações em Atraso | 0 | ✅ Nenhuma |
+
+**Recomendação:** ✅ **APROVADO** - Cliente apresenta bom score e histórico
+
+INSTRUÇÕES DE CONTEÚDO:
+1. Use SEMPRE os dados fornecidos para responder - cite estatísticas, mínimos, máximos, médias
+2. Seja claro, objetivo e MUITO DETALHADO
+3. Formate números adequadamente (valores monetários em R$, percentuais com %)
+4. Destaque informações importantes e insights com negrito/emojis
+5. Se a pergunta pede "clientes com menor/maior score": SEMPRE cite:
+   - O score mínimo e máximo encontrado
+   - Quantos clientes em cada faixa de score
+   - A distribuição por classe de risco em tabela
+   - Exemplos concretos de clientes com scores extremos
+6. Mostre a VARIAÇÃO e DISTRIBUIÇÃO dos dados, NÃO apenas um único valor
+7. Em análises de crédito, sempre forneça:
+   - Resumo dos dados do cliente
+   - Tabela de indicadores principais
+   - Análise de risco detalhada
+   - Recomendação fundamentada (Aprovado/Reprovado/Condicional)
+8. Se não houver dados, informe que não foram encontrados registros
+9. Limite a resposta a no máximo 800 palavras
+10. Sempre termine análises de crédito com recomendação clara (✅/❌/⚠️)
+
+RESUMO DOS DADOS FORNECIDOS: ` + dataSummary
 
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
@@ -478,7 +543,7 @@ RESUMO DOS DADOS: ` + dataSummary
 				{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
 				{Role: openai.ChatMessageRoleUser, Content: originalQuestion},
 			},
-			MaxTokens:   400,
+			MaxTokens:   1000, // Increased for detailed responses with markdown formatting and tables
 			Temperature: config.AppConfig.OpenAI.Temperature,
 		},
 	)
@@ -494,36 +559,148 @@ RESUMO DOS DADOS: ` + dataSummary
 	return resp.Choices[0].Message.Content, nil
 }
 
-// createDataSummary creates a concise summary of data to avoid token overflow
-func createDataSummary(data []map[string]interface{}) string {
+// createDetailedDataSummary creates a comprehensive summary with statistics
+// totalCount includes records not shown in data slice
+func createDetailedDataSummary(data []map[string]interface{}, totalCount int) string {
 	if len(data) == 0 {
 		return "Nenhum dado encontrado."
 	}
 
-	summary := fmt.Sprintf("Total de registros: %d\n\n", len(data))
-	
-	// Show first few records with key information
-	for i, record := range data {
-		if i >= 5 { // Limit to first 5 records for summary
-			summary += fmt.Sprintf("... e mais %d registros\n", len(data)-5)
-			break
+	summary := fmt.Sprintf("=== RESUMO DOS DADOS ===\n")
+	summary += fmt.Sprintf("Total de registros retornados: %d\n", len(data))
+	if totalCount > len(data) {
+		summary += fmt.Sprintf("Total de registros no banco (com filtros): %d\n", totalCount)
+	} else {
+		summary += fmt.Sprintf("Total de registros no banco (com filtros): %d\n", totalCount)
+	}
+	summary += "\n"
+
+	// Calculate statistics for numeric fields
+	stats := calculateStatistics(data)
+	if len(stats) > 0 {
+		summary += "=== ESTATÍSTICAS ===\n"
+		for field, fieldStats := range stats {
+			summary += fmt.Sprintf("\n%s:\n", field)
+			summary += fmt.Sprintf("  - Mínimo: %v\n", fieldStats["min"])
+			summary += fmt.Sprintf("  - Máximo: %v\n", fieldStats["max"])
+			summary += fmt.Sprintf("  - Média: %.2f\n", fieldStats["avg"].(float64))
+			summary += fmt.Sprintf("  - Registros com valor: %d\n", fieldStats["count"])
 		}
-		
-		summary += fmt.Sprintf("Registro %d:\n", i+1)
-		
-		// Include only important fields to save tokens
-		importantFields := []string{"nome", "score_credito", "classe_risco", "valor_solicitado", 
-			"valor_aprovado", "decisao", "status", "modalidade", "dias_atraso", "count", "avg", "sum"}
-		
+		summary += "\n"
+	}
+
+	// Show distribution for categorical fields
+	distributions := calculateDistribution(data)
+	if len(distributions) > 0 {
+		summary += "=== DISTRIBUIÇÃO POR CATEGORIA ===\n"
+		for field, dist := range distributions {
+			summary += fmt.Sprintf("\n%s:\n", field)
+			for value, count := range dist {
+				percentage := float64(count) / float64(len(data)) * 100
+				summary += fmt.Sprintf("  - %v: %d registros (%.1f%%)\n", value, count, percentage)
+			}
+		}
+		summary += "\n"
+	}
+
+	// Show actual records with detailed information
+	summary += "=== DETALHES DOS REGISTROS ===\n"
+	recordsToShow := 20 // Show more records for better analysis
+	if len(data) < recordsToShow {
+		recordsToShow = len(data)
+	}
+
+	for i := 0; i < recordsToShow; i++ {
+		record := data[i]
+		summary += fmt.Sprintf("\nRegistro %d:\n", i+1)
+
+		// Show important fields in priority order
+		importantFields := []string{"nome", "score_credito", "classe_risco", "tipo_pessoa",
+			"valor_solicitado", "valor_aprovado", "decisao", "status", "modalidade",
+			"dias_atraso", "taxa_aprovada", "renda_mensal", "uf", "cidade", "ativo"}
+
 		for _, field := range importantFields {
 			if value, exists := record[field]; exists {
 				summary += fmt.Sprintf("  %s: %v\n", field, value)
 			}
 		}
-		summary += "\n"
 	}
-	
+
+	if recordsToShow < len(data) {
+		summary += fmt.Sprintf("\n... e mais %d registros (mostrando detalhes dos primeiros %d)\n",
+			len(data)-recordsToShow, recordsToShow)
+	}
+
 	return summary
+}
+
+// calculateStatistics computes min, max, avg, count for numeric fields
+func calculateStatistics(data []map[string]interface{}) map[string]map[string]interface{} {
+	stats := make(map[string]map[string]interface{})
+	numericFields := []string{"score_credito", "valor_solicitado", "valor_aprovado",
+		"taxa_aprovada", "renda_mensal", "faturamento_anual", "dias_atraso",
+		"taxa_juros_mensal", "valor_contratado", "valor_saldo"}
+
+	for _, field := range numericFields {
+		var values []float64
+		for _, record := range data {
+			if val, exists := record[field]; exists && val != nil {
+				switch v := val.(type) {
+				case float64:
+					values = append(values, v)
+				case int:
+					values = append(values, float64(v))
+				}
+			}
+		}
+
+		if len(values) > 0 {
+			min := values[0]
+			max := values[0]
+			sum := 0.0
+
+			for _, v := range values {
+				if v < min {
+					min = v
+				}
+				if v > max {
+					max = v
+				}
+				sum += v
+			}
+
+			avg := sum / float64(len(values))
+			stats[field] = map[string]interface{}{
+				"min":   min,
+				"max":   max,
+				"avg":   avg,
+				"count": len(values),
+			}
+		}
+	}
+
+	return stats
+}
+
+// calculateDistribution counts occurrences of categorical field values
+func calculateDistribution(data []map[string]interface{}) map[string]map[interface{}]int {
+	dist := make(map[string]map[interface{}]int)
+	categoricalFields := []string{"classe_risco", "tipo_pessoa", "decisao", "status",
+		"modalidade", "ativo", "uf"}
+
+	for _, field := range categoricalFields {
+		fieldDist := make(map[interface{}]int)
+		for _, record := range data {
+			if val, exists := record[field]; exists && val != nil {
+				fieldDist[val]++
+			}
+		}
+		if len(fieldDist) > 0 {
+			dist[field] = fieldDist
+		}
+	}
+
+	return dist
 }
 
 // generateRegularResponse generates a regular OpenAI response for general questions

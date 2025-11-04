@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 
@@ -22,18 +23,22 @@ func makeSupabaseRequest(method, table string, body interface{}, queryParams map
 		return nil, fmt.Errorf("supabase credentials not configured")
 	}
 
-	url := fmt.Sprintf("%s/rest/v1/%s", baseURL, table)
-	
-	// Add query parameters
+	urlStr := fmt.Sprintf("%s/rest/v1/%s", baseURL, table)
+
+	// Add query parameters with proper URL encoding
 	if len(queryParams) > 0 {
-		url += "?"
+		queryString := ""
 		first := true
 		for key, value := range queryParams {
 			if !first {
-				url += "&"
+				queryString += "&"
 			}
-			url += fmt.Sprintf("%s=%s", key, value)
+			// Properly encode both key and value
+			queryString += fmt.Sprintf("%s=%s", url.QueryEscape(key), url.QueryEscape(value))
 			first = false
+		}
+		if queryString != "" {
+			urlStr += "?" + queryString
 		}
 	}
 
@@ -46,7 +51,7 @@ func makeSupabaseRequest(method, table string, body interface{}, queryParams map
 		reqBody = bytes.NewBuffer(jsonBody)
 	}
 
-	req, err := http.NewRequest(method, url, reqBody)
+	req, err := http.NewRequest(method, urlStr, reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +295,29 @@ func DeleteData(c *fiber.Ctx) error {
 	})
 }
 
-// GetClientes fetches clientes with pagination and limited fields
+// buildSupabaseFilterQuery builds a Supabase query string with proper filter syntax
+// Returns a query string that can have multiple filters for the same field
+func buildSupabaseFilterQuery(filters map[string][]string, pagination map[string]string) string {
+	params := url.Values{}
+
+	// Add pagination and select parameters
+	for key, value := range pagination {
+		params.Add(key, value)
+	}
+
+	// Add filters - note that PostgREST allows multiple filters on same field with AND logic
+	for field, values := range filters {
+		for _, value := range values {
+			if value != "" {
+				params.Add(field, value)
+			}
+		}
+	}
+
+	return params.Encode()
+}
+
+// GetClientes fetches clientes with pagination and filters
 // @Summary List clientes with pagination and filters
 // @Description Get a paginated list of clientes with essential fields and optional filters
 // @Tags Clientes
@@ -305,6 +332,7 @@ func DeleteData(c *fiber.Ctx) error {
 // @Param tipo_pessoa query string false "Filter by person type (PF or PJ)"
 // @Param ativo query boolean false "Filter by active status"
 // @Success 200 {object} models.PaginatedResponse{data=[]models.ClienteSummary}
+// @Failure 400 {object} models.ErrorResponse
 // @Failure 500 {object} models.ErrorResponse
 // @Router /clientes [get]
 func GetClientes(c *fiber.Ctx) error {
@@ -314,11 +342,11 @@ func GetClientes(c *fiber.Ctx) error {
 
 	// Parse filter parameters
 	search := c.Query("search")
-	scoreMin := c.Query("score_min")
-	scoreMax := c.Query("score_max")
+	scoreMinStr := c.Query("score_min")
+	scoreMaxStr := c.Query("score_max")
 	classeRisco := c.Query("classe_risco")
 	tipoPessoa := c.Query("tipo_pessoa")
-	ativo := c.Query("ativo")
+	ativoStr := c.Query("ativo")
 
 	// Validate and limit pagination
 	if page < 1 {
@@ -331,64 +359,117 @@ func GetClientes(c *fiber.Ctx) error {
 		perPage = 100 // Maximum limit for safety
 	}
 
-	// Calculate offset
+	// Validate filter parameters
+	var scoreMin, scoreMax int
+	if scoreMinStr != "" {
+		var err error
+		scoreMin, err = strconv.Atoi(scoreMinStr)
+		if err != nil || scoreMin < 0 || scoreMin > 1000 {
+			return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
+				Error:   true,
+				Message: "score_min must be a number between 0 and 1000",
+				Code:    fiber.StatusBadRequest,
+			})
+		}
+	}
+
+	if scoreMaxStr != "" {
+		var err error
+		scoreMax, err = strconv.Atoi(scoreMaxStr)
+		if err != nil || scoreMax < 0 || scoreMax > 1000 {
+			return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
+				Error:   true,
+				Message: "score_max must be a number between 0 and 1000",
+				Code:    fiber.StatusBadRequest,
+			})
+		}
+	}
+
+	// Validate that score_min <= score_max
+	if scoreMinStr != "" && scoreMaxStr != "" && scoreMin > scoreMax {
+		return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "score_min must be less than or equal to score_max",
+			Code:    fiber.StatusBadRequest,
+		})
+	}
+
+	// Validate tipo_pessoa
+	if tipoPessoa != "" && tipoPessoa != "PF" && tipoPessoa != "PJ" {
+		return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "tipo_pessoa must be 'PF' or 'PJ'",
+			Code:    fiber.StatusBadRequest,
+		})
+	}
+
+	// Validate ativo (should be true or false)
+	if ativoStr != "" && ativoStr != "true" && ativoStr != "false" {
+		return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "ativo must be 'true' or 'false'",
+			Code:    fiber.StatusBadRequest,
+		})
+	}
+
+	// Calculate offset for pagination
 	offset := (page - 1) * perPage
 
-	// Build filter parameters for count
-	countParams := map[string]string{
-		"select": "count",
-	}
-
-	// Build filter parameters for data query
-	queryParams := map[string]string{
-		"select": "id,nome,cpf_cnpj,score_credito,classe_risco,tipo_pessoa,ativo",
-		"limit":  strconv.Itoa(perPage),
-		"offset": strconv.Itoa(offset),
-		"order":  "nome.asc",
-	}
-
-	// Apply filters to both count and data queries
+	// Build filter parameters using URL values to support multiple filters on same field
+	// Count query filters
+	countFilters := make(map[string][]string)
 	if search != "" {
-		// PostgREST: ilike for case-insensitive partial match
-		countParams["nome"] = "ilike.*" + search + "*"
-		queryParams["nome"] = "ilike.*" + search + "*"
+		countFilters["nome"] = []string{"ilike.*" + search + "*"}
 	}
-	if scoreMin != "" {
-		countParams["score_credito"] = "gte." + scoreMin
-		queryParams["score_credito"] = "gte." + scoreMin
+	if scoreMinStr != "" {
+		countFilters["score_credito"] = []string{"gte." + scoreMinStr}
 	}
-	if scoreMax != "" {
-		// If both min and max, need to combine
-		if scoreMin != "" {
-			// PostgREST doesn't support multiple filters on same field easily
-			// We'll use gte.min and lte.max separately
-			delete(countParams, "score_credito")
-			delete(queryParams, "score_credito")
-			countParams["score_credito"] = "gte." + scoreMin
-			queryParams["score_credito"] = "gte." + scoreMin
-			// Add max with and. syntax (advanced filtering)
-			// Actually, PostgREST doesn't support this easily via query params
-			// We'll just apply max as lte if no min
+	if scoreMaxStr != "" {
+		// For score_max, we add it as an additional filter on the same field
+		if scoreMinStr != "" {
+			countFilters["score_credito"] = append(countFilters["score_credito"], "lte."+scoreMaxStr)
 		} else {
-			countParams["score_credito"] = "lte." + scoreMax
-			queryParams["score_credito"] = "lte." + scoreMax
+			countFilters["score_credito"] = []string{"lte." + scoreMaxStr}
 		}
 	}
 	if classeRisco != "" {
-		countParams["classe_risco"] = "eq." + classeRisco
-		queryParams["classe_risco"] = "eq." + classeRisco
+		countFilters["classe_risco"] = []string{"eq." + classeRisco}
 	}
 	if tipoPessoa != "" {
-		countParams["tipo_pessoa"] = "eq." + tipoPessoa
-		queryParams["tipo_pessoa"] = "eq." + tipoPessoa
+		countFilters["tipo_pessoa"] = []string{"eq." + tipoPessoa}
 	}
-	if ativo != "" {
-		countParams["ativo"] = "eq." + ativo
-		queryParams["ativo"] = "eq." + ativo
+	if ativoStr != "" {
+		countFilters["ativo"] = []string{"eq." + ativoStr}
 	}
 
-	// Get total count with filters
-	countBody, err := makeSupabaseRequest("GET", "clientes", nil, countParams)
+	// Count pagination parameters
+	countPagination := map[string]string{
+		"select": "count",
+	}
+
+	// Build count query string using url.Values for proper encoding
+	countQueryString := buildSupabaseFilterQuery(countFilters, countPagination)
+
+	// Get total count with filters using custom URL construction
+	baseURL := os.Getenv("SUPABASE_URL")
+	apiKey := os.Getenv("SUPABASE_API_KEY")
+
+	if baseURL == "" || apiKey == "" {
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error:   true,
+			Message: "Supabase credentials not configured",
+			Code:    fiber.StatusInternalServerError,
+		})
+	}
+
+	countURL := fmt.Sprintf("%s/rest/v1/clientes?%s", baseURL, countQueryString)
+	countReq, _ := http.NewRequest("GET", countURL, nil)
+	countReq.Header.Set("apikey", apiKey)
+	countReq.Header.Set("Authorization", "Bearer "+apiKey)
+	countReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	countResp, err := client.Do(countReq)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
 			Error:   true,
@@ -396,15 +477,12 @@ func GetClientes(c *fiber.Ctx) error {
 			Code:    fiber.StatusInternalServerError,
 		})
 	}
+	defer countResp.Body.Close()
+
+	countBody, _ := io.ReadAll(countResp.Body)
 
 	var countResult []map[string]interface{}
-	if err := json.Unmarshal(countBody, &countResult); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
-			Error:   true,
-			Message: "Failed to parse count: " + err.Error(),
-			Code:    fiber.StatusInternalServerError,
-		})
-	}
+	json.Unmarshal(countBody, &countResult)
 
 	total := 0
 	if len(countResult) > 0 {
@@ -413,8 +491,48 @@ func GetClientes(c *fiber.Ctx) error {
 		}
 	}
 
-	// Fetch clientes with filters already applied in queryParams
-	responseBody, err := makeSupabaseRequest("GET", "clientes", nil, queryParams)
+	// Build data query filters (same as count but with pagination)
+	dataFilters := make(map[string][]string)
+	if search != "" {
+		dataFilters["nome"] = []string{"ilike.*" + search + "*"}
+	}
+	if scoreMinStr != "" {
+		dataFilters["score_credito"] = []string{"gte." + scoreMinStr}
+	}
+	if scoreMaxStr != "" {
+		if scoreMinStr != "" {
+			dataFilters["score_credito"] = append(dataFilters["score_credito"], "lte."+scoreMaxStr)
+		} else {
+			dataFilters["score_credito"] = []string{"lte." + scoreMaxStr}
+		}
+	}
+	if classeRisco != "" {
+		dataFilters["classe_risco"] = []string{"eq." + classeRisco}
+	}
+	if tipoPessoa != "" {
+		dataFilters["tipo_pessoa"] = []string{"eq." + tipoPessoa}
+	}
+	if ativoStr != "" {
+		dataFilters["ativo"] = []string{"eq." + ativoStr}
+	}
+
+	// Data pagination parameters
+	dataPagination := map[string]string{
+		"select": "id,nome,cpf_cnpj,score_credito,classe_risco,tipo_pessoa,ativo",
+		"limit":  strconv.Itoa(perPage),
+		"offset": strconv.Itoa(offset),
+		"order":  "nome.asc",
+	}
+
+	dataQueryString := buildSupabaseFilterQuery(dataFilters, dataPagination)
+	dataURL := fmt.Sprintf("%s/rest/v1/clientes?%s", baseURL, dataQueryString)
+
+	dataReq, _ := http.NewRequest("GET", dataURL, nil)
+	dataReq.Header.Set("apikey", apiKey)
+	dataReq.Header.Set("Authorization", "Bearer "+apiKey)
+	dataReq.Header.Set("Content-Type", "application/json")
+
+	dataResp, err := client.Do(dataReq)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
 			Error:   true,
@@ -422,6 +540,9 @@ func GetClientes(c *fiber.Ctx) error {
 			Code:    fiber.StatusInternalServerError,
 		})
 	}
+	defer dataResp.Body.Close()
+
+	responseBody, _ := io.ReadAll(dataResp.Body)
 
 	var clientes []models.ClienteSummary
 	if err := json.Unmarshal(responseBody, &clientes); err != nil {
